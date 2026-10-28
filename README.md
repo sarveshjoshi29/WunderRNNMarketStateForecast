@@ -18,7 +18,7 @@ Reproduce with `python data_analysis.py` (needs `train.parquet` in the repo root
 - **Clean, standardized data.** No NaNs. Every feature has mean ≈ 0 and std ≈ 1 (0.985–1.011), and the distribution is stable over time (std 1.01 / 0.99 / 0.99 over steps 0–100 / 100–500 / 500–999). No drift to model.
 - **Strongly mean-reverting, weakly autocorrelated.** Lag-1 autocorrelation of the levels is 0.30 (median; range 0.03–0.52 across features).
 - **Persistence loses badly.** Predicting `x[t+1] = x[t]` gives R² = −0.39, in line with theory: with lag-1 correlation ρ the persistence R² is 2ρ − 1 ≈ −0.4. The task is predicting reversion, not continuation.
-- **Differences are over-differenced.** Lag-1 autocorrelation of first differences is −0.54 (all 32 features between −0.44 and −0.63). That is the signature of differencing a near-stationary series (white noise gives −0.5). Differencing adds MA(1) structure instead of removing a trend. Hypothesis for why every differenced submission (#13–19, #22) lost to raw states.
+- **Differences are over-differenced.** Lag-1 autocorrelation of first differences is −0.54 (all 32 features between −0.44 and −0.63). That is the signature of differencing a near-stationary series (white noise gives −0.5). Differencing adds MA(1) structure instead of removing a trend. Hypothesis for why every differenced submission (#14–17, #22, `made_ct_1`) lost to raw states.
 - **Short memory.** Difference autocorrelation is 0.10 at lag 2 and about 0 at lags 5 and 10 (−0.05, 0.03). Little signal beyond the last few steps.
 - **Features are correlated and low-dimensional.** Mean absolute correlation between features is 0.36 (max 0.95). The top 3 principal components explain 73% of the variance and the top 10 explain 98%. Cross-feature structure carries predictive signal.
 - **Sequence-level offsets are large.** The spread of per-sequence means is 0.57 of the within-sequence std. This motivated the mean-centering variants (#24–30), which did not help on the leaderboard.
@@ -65,8 +65,8 @@ Used for most submissions (1–12, 21, 24–30).
 - Variations across submissions: re-encode interval *N* (1, 7, 10, 15), subtracting the window mean before encoding, retrained weights, layer sizes.
 
 ### 6. Same model on first differences: `Differenced_AE_Attention.ipynb`
-Used for submissions 13–19, 22 and `Sub22/made_ct_1`.
-- Train on `x[t+1] − x[t]` instead of raw states; weights in `AE_wts_diffs.weights.h5`. Differencing is in the copies under `Submission13/` and `Submission14/`.
+Used for submissions 14–17, 22 and `Sub22/made_ct_1`. Weight files named `_diffs` are not always differenced: #13, #18 and #19 were trained on raw states.
+- Train on `x[t+1] − x[t]` instead of raw states; weights in `AE_wts_diffs.weights.h5`. Differencing is in the copies under `Submission14/` and `Sub22/`.
 - The later top-level notebook drops differencing and adds a causal `Conv1D` front-end, `LayerNormalization`, and wider LSTMs (64, 50, 32).
 
 ### 7. iTransformer-style model: `iTransformer.ipynb`
@@ -101,13 +101,13 @@ Leaderboard R². "Re-encode every N" means the encoder re-reads the last 100 sta
 | 10 | 11-03 | 5 | [24, 20, 40] | 0.31700 |
 | 11 | 11-03 | 5 | Same, every step | 0.27771 |
 | 12 | 11-04 | 5 | [48, 20, 20] | 0.31119 |
-| 13 | 11-06 | 6 | Weights trained on differences [40, 40, 40], but inference fed raw states | 0.22792 |
-| 14 | 11-06 | 6 | Inference fed differences | −0.31231 |
-| 15 | 11-06 | 6 | Retrained, decoder fed differences | 0.05357 |
-| 16 | 11-06 | 6 | Retrained | 0.05357 |
-| 17 | 11-06 | 6 | Retrained | 0.05357 |
-| 18 | 11-11 | 6 | Added Conv1D front-end | −0.51097 |
-| 19 | 11-11 | 6 | Conv1D, retrained | −365.51116 |
+| 13 | 11-06 | 5 | Raw states, [40, 40, 40], trained on only 250 of 517 sequences (weights named `_diffs`) | 0.22792 |
+| 14 | 11-06 | 6 | Differenced model (99-step diffs), decoder fed the raw state | −0.31231 |
+| 15 | 11-06 | 6 | Same weights as #14, decoder fed differences | 0.05357 |
+| 16 | 11-06 | 6 | Identical weights and behavior to #15 | 0.05357 |
+| 17 | 11-06 | 6 | Identical to #15–16 (`to_predict` 900 only) | 0.05357 |
+| 18 | 11-11 | 5 | Conv1D + LayerNorm, trained on raw states, output used as the state | −0.51097 |
+| 19 | 11-11 | 5 | #18 weights, but `model.py` has the 3 LayerNorm layers removed | −365.51116 |
 | try | 11-12 | ? | Not in repo | −0.31231 |
 | 21 | 11-12 | 5 | Conv1D + [48, 40, 40], every 7 | 0.31544 |
 | 22 | 11-12 | 6 | Differences, every 7 | 0.21829 |
@@ -124,7 +124,7 @@ Leaderboard R². "Re-encode every N" means the encoder re-reads the last 100 sta
 
 - **Best: #9 (0.31990).** Plain encoder-decoder with attention, re-encoding every 7 steps.
 - **Re-encoding every step always hurt** (#2, #4, #11, #27, both `made_ct_1`), by 0.02–0.12 against the matching every-7 or every-10 run.
-- **Differencing never beat raw states.** The best differenced run was #13, and that one fed raw states at inference anyway.
-- **#15–17 scored exactly 0.05357 despite different weights.** That suggests the prediction ignored the weights, i.e. an inference bug.
-- **Conv1D on the differenced model failed:** #18 scored −0.51, and #19 diverged to −365 (an autoregressive blow-up). The same Conv1D on raw states (#21) scored 0.31544.
+- **Differencing never beat raw states.** The best properly differenced run was #22 (0.21829), against 0.29–0.32 for raw-state runs.
+- **#15–17 scored exactly 0.05357 because they are the same submission.** All three load the same weights (`fc88780f`; #14 does too) and differ only in a build-shape argument and an init value that is overwritten at each new sequence. Not a bug, but three leaderboard slots spent on one model. #14 → #15 (feeding the decoder differences instead of the raw state) moved the score from −0.31 to 0.05.
+- **#19 (−365) is a model/weights mismatch.** Its weights file contains three `LayerNormalization` layers, but its `model.py` has none. Keras loads the weights without an error and skips the missing layers (checked by loading both versions), so activations are mis-scaled and the autoregressive loop blows up. #18 has the matching architecture and loads cleanly, yet still scored −0.51. I did not find why, so that one stays undiagnosed. The same Conv1D design with a consistent setup (#21) scored 0.31544.
 - **Mean-centering (#24–30) never beat the earlier non-centered runs.**
