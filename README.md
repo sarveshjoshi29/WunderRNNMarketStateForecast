@@ -9,6 +9,35 @@ My approaches to the [Wunder Fund](https://wunderfund.io) RNN challenge (Sep–N
 - Metric: R² averaged over the 32 features.
 - Inference is online: `solution.py` receives one `DataPoint` at a time (see `utils.py`).
 
+**Result: 444th of ~5,000 (top ~9%), best 0.31990 R² (#9). Top score on the board: 0.39196.**
+
+## Data analysis
+
+Reproduce with `python data_analysis.py` (needs `train.parquet` in the repo root). Findings:
+
+- **Clean, standardized data.** No NaNs. Every feature has mean ≈ 0 and std ≈ 1 (0.985–1.011), and the distribution is stable over time (std 1.01 / 0.99 / 0.99 over steps 0–100 / 100–500 / 500–999). No drift to model.
+- **Strongly mean-reverting, weakly autocorrelated.** Lag-1 autocorrelation of the levels is 0.30 (median; range 0.03–0.52 across features).
+- **Persistence loses badly.** Predicting `x[t+1] = x[t]` gives R² = −0.39, in line with theory: with lag-1 correlation ρ the persistence R² is 2ρ − 1 ≈ −0.4. The task is predicting reversion, not continuation.
+- **Differences are over-differenced.** Lag-1 autocorrelation of first differences is −0.54 (all 32 features between −0.44 and −0.63). That is the signature of differencing a near-stationary series (white noise gives −0.5). Differencing adds MA(1) structure instead of removing a trend. Hypothesis for why every differenced submission (#13–19, #22) lost to raw states.
+- **Short memory.** Difference autocorrelation is 0.10 at lag 2 and about 0 at lags 5 and 10 (−0.05, 0.03). Little signal beyond the last few steps.
+- **Features are correlated and low-dimensional.** Mean absolute correlation between features is 0.36 (max 0.95). The top 3 principal components explain 73% of the variance and the top 10 explain 98%. Cross-feature structure carries predictive signal.
+- **Sequence-level offsets are large.** The spread of per-sequence means is 0.57 of the within-sequence std. This motivated the mean-centering variants (#24–30), which did not help on the leaderboard.
+
+### Baselines
+
+Ridge regression on the last *k* states (all 32 features), trained and validated on a split by `seq_ix` (80/20, seed 29), predicting steps 100–998:
+
+| Model | R² |
+|---|---|
+| Persistence (`x[t]`) | −0.48 (val split), −0.39 (all data) |
+| Ridge, k = 1 | 0.200 |
+| Ridge, k = 5 | 0.269 |
+| Ridge, k = 20 | 0.285 |
+| **My best LSTM-attention (#9, leaderboard)** | **0.320** |
+| Top of the leaderboard | 0.392 |
+
+My own split and the hidden test set differ, so the ridge and leaderboard figures are not strictly comparable. Even so, the 31 submissions improve on a 20-step linear model by only about 0.03. The gap from linear to the top score (about 0.11) is larger than the gap from my best to the top (0.07).
+
 ## Approaches
 
 Rough chronological order. Scores are still to be added.
